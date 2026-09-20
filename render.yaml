@@ -1,0 +1,101 @@
+# Render Blueprint for AureusERP
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # Web Service (Laravel + PHP-FPM)
+  - type: web
+    name: aureuserp-web
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /up
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+        sync: false  # Set in dashboard: https://your-app.onrender.com
+      - key: APP_KEY
+        generateValue: false  # Set manually: php artisan key:generate
+      # Supabase PostgreSQL (External Database)
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        sync: false  # Set in dashboard: db.xxxx.supabase.co (IPv4 pooler)
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_DATABASE
+        sync: false  # Set in dashboard: postgres
+      - key: DB_USERNAME
+        sync: false  # Set in dashboard: postgres.xxxx
+      - key: DB_PASSWORD
+        sync: false  # Set in dashboard: your-supabase-password
+      - key: CACHE_STORE
+        value: database
+      - key: SESSION_DRIVER
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: LOG_CHANNEL
+        value: stack
+      - key: LOG_LEVEL
+        value: error
+      - key: PHP_CLI_SERVER_WORKERS
+        value: "4"
+    # Render sets PORT automatically; app must bind to 0.0.0.0:$PORT
+    startCommand: >-
+      sed -i "s/listen 80;/listen $PORT;/g" /etc/nginx/conf.d/aureus.conf &&
+      sed -i "s/127.0.0.1:80/0.0.0.0:$PORT/g" /etc/nginx/conf.d/aureus.conf &&
+      /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf
+    preDeployCommand: "php artisan migrate --force"
+    autoDeployTrigger: commit
+
+  # Background Worker (Queue)
+  - type: worker
+    name: aureuserp-worker
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      # Supabase PostgreSQL (same as web service)
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_DATABASE
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: CACHE_STORE
+        value: database
+      - key: SESSION_DRIVER
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+    startCommand: "php artisan queue:work --sleep=3 --tries=3 --max-time=3600"
+
+# Optional: Cron Job for scheduled tasks
+# - type: cron
+#   name: aureuserp-scheduler
+#   runtime: docker
+#   region: oregon
+#   plan: starter
+#   dockerfilePath: ./Dockerfile.render
+#   dockerContext: .
+#   schedule: "0 * * * *"  # Every hour
+#   startCommand: "php artisan schedule:run"
+#   envVars:
+#     # ... same as web service
